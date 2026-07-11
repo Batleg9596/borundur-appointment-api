@@ -72,7 +72,7 @@ def authorized():
 
 @APP.before_request
 def check_auth():
-    if request.path in {"/health", "/webhook"}:
+    if request.path in {"/health", "/webhook", "/privacy", "/delete-data"}:
         return None
     if not authorized():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
@@ -417,7 +417,56 @@ def available_times():
         "doctor": doctor,
         "times": [x for x in default_slots if x not in taken],
     })
+@APP.get("/privacy")
+def privacy_policy():
+    return """
+    <!DOCTYPE html>
+    <html lang="mn">
+    <head>
+        <meta charset="UTF-8">
+        <title>Нууцлалын бодлого</title>
+    </head>
+    <body style="font-family:Arial; max-width:800px; margin:40px auto; line-height:1.6;">
+        <h1>Нууцлалын бодлого</h1>
+        <p>Бор-Өндөр уламжлалт эмнэлгийн цахим цаг захиалгын систем нь
+        хэрэглэгчийн нэр, утасны дугаар, сонгосон үйлчилгээ, огноо болон цагийн
+        мэдээллийг зөвхөн эмнэлгийн цаг захиалгыг зохион байгуулах зорилгоор ашиглана.</p>
 
+        <p>Хэрэглэгчийн мэдээллийг зөвшөөрөлгүйгээр гуравдагч этгээдэд худалдах,
+        сурталчилгаанд ашиглахгүй.</p>
+
+        <p>Мэдээллийг зөвхөн эрх бүхий эмнэлгийн ажилтан үзэх боломжтой.</p>
+
+        <p>Мэдээллээ устгуулах хүсэлтийг эмнэлгийн Facebook Page-ийн Messenger-ээр
+        илгээж болно.</p>
+
+        <p>Сүүлд шинэчилсэн: 2026-07-11</p>
+    </body>
+    </html>
+    """, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@APP.get("/delete-data")
+def delete_data_instructions():
+    return """
+    <!DOCTYPE html>
+    <html lang="mn">
+    <head>
+        <meta charset="UTF-8">
+        <title>Хэрэглэгчийн мэдээлэл устгах</title>
+    </head>
+    <body style="font-family:Arial; max-width:800px; margin:40px auto; line-height:1.6;">
+        <h1>Хэрэглэгчийн мэдээлэл устгуулах заавар</h1>
+        <p>Цахим цаг захиалгын системд хадгалагдсан мэдээллээ устгуулахын тулд
+        Бор-Өндөр уламжлалт эмнэлгийн Facebook Page-ийн Messenger рүү
+        “Мэдээллээ устгуулна” гэж бичнэ үү.</p>
+
+        <p>Хүсэлтдээ цаг захиалгад ашигласан нэр, утасны дугаараа оруулна.</p>
+
+        <p>Эмнэлгийн ажилтан хүсэлтийг шалгаж, холбогдох мэдээллийг системээс устгана.</p>
+    </body>
+    </html>
+    """, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 init_db()
 
