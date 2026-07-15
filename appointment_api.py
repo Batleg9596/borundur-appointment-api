@@ -3,6 +3,7 @@ import os
 from datetime import datetime, date, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify, render_template_string, redirect, session
+from urllib.parse import quote
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
@@ -117,23 +118,59 @@ def admin_delete(i):
 @APP.route('/admin/doctors',methods=['GET','POST'])
 @guard
 def doctors():
-    if request.method=='POST':run('INSERT INTO doctors(name,active) VALUES(:n,TRUE) ON CONFLICT(name) DO NOTHING',{'n':request.form['name']})
-    b=TOP+'<div class=c><form method=post><input name=name placeholder="Эмчийн нэр"><button>Нэмэх</button></form></div><div class=c><table><tr><th>Нэр</th><th>Төлөв</th><th>Үйлдэл</th></tr>'
-    for x in allq('SELECT * FROM doctors ORDER BY name'):b+=f"<tr><td>{x['name']}</td><td>{'Идэвхтэй' if x['active'] else 'Идэвхгүй'}</td><td><form method=post action=/admin/doctors/{x['id']}/toggle><button>Солих</button></form></td></tr>"
+    if request.method=='POST':
+        name=request.form.get('name','').strip()
+        if name: run('INSERT INTO doctors(name,active) VALUES(:n,TRUE) ON CONFLICT(name) DO NOTHING',{'n':name})
+    msg=request.args.get('msg','')
+    b=TOP
+    if msg: b+=f'<div class=c style="color:#9a2f2f">{msg}</div>'
+    b+='<div class=c><form method=post><input name=name placeholder="Эмчийн нэр" required><button>Нэмэх</button></form></div><div class=c><table><tr><th>Нэр</th><th>Төлөв</th><th>Үйлдэл</th></tr>'
+    for x in allq('SELECT * FROM doctors ORDER BY name'):
+        b+=f"<tr><td>{x['name']}</td><td>{'Идэвхтэй' if x['active'] else 'Идэвхгүй'}</td><td><form class=inline method=post action=/admin/doctors/{x['id']}/toggle><button>Солих</button></form> <form class=inline method=post action=/admin/doctors/{x['id']}/delete onsubmit=\"return confirm('Эмчийг устгах уу?')\"><button class=red>Устгах</button></form></td></tr>"
     return b+'</table></div></div>'
 @APP.post('/admin/doctors/<int:i>/toggle')
 @guard
 def dt(i):run('UPDATE doctors SET active=NOT active WHERE id=:i',{'i':i});return redirect('/admin/doctors')
+@APP.post('/admin/doctors/<int:i>/delete')
+@guard
+def dd(i):
+    row=allq('SELECT name FROM doctors WHERE id=:i',{'i':i})
+    if not row:return redirect('/admin/doctors')
+    name=row[0]['name']
+    used=allq('SELECT COUNT(*) AS n FROM appointments WHERE doctor=:n',{'n':name})[0]['n']
+    if used:
+        run('UPDATE doctors SET active=FALSE WHERE id=:i',{'i':i})
+        return redirect('/admin/doctors?msg='+quote('Энэ эмч захиалгад ашиглагдсан тул устгалгүй, идэвхгүй болголоо.'))
+    run('DELETE FROM doctors WHERE id=:i',{'i':i})
+    return redirect('/admin/doctors')
 @APP.route('/admin/services',methods=['GET','POST'])
 @guard
 def services():
-    if request.method=='POST':run('INSERT INTO services(name,active) VALUES(:n,TRUE) ON CONFLICT(name) DO NOTHING',{'n':request.form['name']})
-    b=TOP+'<div class=c><form method=post><input name=name placeholder="Үйлчилгээ"><button>Нэмэх</button></form></div><div class=c><table><tr><th>Нэр</th><th>Төлөв</th><th>Үйлдэл</th></tr>'
-    for x in allq('SELECT * FROM services ORDER BY name'):b+=f"<tr><td>{x['name']}</td><td>{'Идэвхтэй' if x['active'] else 'Идэвхгүй'}</td><td><form method=post action=/admin/services/{x['id']}/toggle><button>Солих</button></form></td></tr>"
+    if request.method=='POST':
+        name=request.form.get('name','').strip()
+        if name: run('INSERT INTO services(name,active) VALUES(:n,TRUE) ON CONFLICT(name) DO NOTHING',{'n':name})
+    msg=request.args.get('msg','')
+    b=TOP
+    if msg: b+=f'<div class=c style="color:#9a2f2f">{msg}</div>'
+    b+='<div class=c><form method=post><input name=name placeholder="Үйлчилгээ" required><button>Нэмэх</button></form></div><div class=c><table><tr><th>Нэр</th><th>Төлөв</th><th>Үйлдэл</th></tr>'
+    for x in allq('SELECT * FROM services ORDER BY name'):
+        b+=f"<tr><td>{x['name']}</td><td>{'Идэвхтэй' if x['active'] else 'Идэвхгүй'}</td><td><form class=inline method=post action=/admin/services/{x['id']}/toggle><button>Солих</button></form> <form class=inline method=post action=/admin/services/{x['id']}/delete onsubmit=\"return confirm('Үйлчилгээг устгах уу?')\"><button class=red>Устгах</button></form></td></tr>"
     return b+'</table></div></div>'
 @APP.post('/admin/services/<int:i>/toggle')
 @guard
 def st(i):run('UPDATE services SET active=NOT active WHERE id=:i',{'i':i});return redirect('/admin/services')
+@APP.post('/admin/services/<int:i>/delete')
+@guard
+def sd(i):
+    row=allq('SELECT name FROM services WHERE id=:i',{'i':i})
+    if not row:return redirect('/admin/services')
+    name=row[0]['name']
+    used=allq('SELECT COUNT(*) AS n FROM appointments WHERE service=:n',{'n':name})[0]['n']
+    if used:
+        run('UPDATE services SET active=FALSE WHERE id=:i',{'i':i})
+        return redirect('/admin/services?msg='+quote('Энэ үйлчилгээ захиалгад ашиглагдсан тул устгалгүй, идэвхгүй болголоо.'))
+    run('DELETE FROM services WHERE id=:i',{'i':i})
+    return redirect('/admin/services')
 @APP.route('/admin/settings',methods=['GET','POST'])
 @guard
 def aset():
