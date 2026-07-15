@@ -29,6 +29,8 @@ def init():
         status TEXT NOT NULL DEFAULT 'Шинэ',source TEXT NOT NULL DEFAULT 'Web',synced BOOLEAN NOT NULL DEFAULT FALSE,
         note TEXT,created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(appointment_date,appointment_time,doctor))'''))
+        c.execute(text("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT FALSE"))
+        c.execute(text("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS delete_synced BOOLEAN NOT NULL DEFAULT FALSE"))
         c.execute(text('CREATE TABLE IF NOT EXISTS doctors(id BIGSERIAL PRIMARY KEY,name TEXT UNIQUE NOT NULL,active BOOLEAN NOT NULL DEFAULT TRUE)'))
         c.execute(text('CREATE TABLE IF NOT EXISTS services(id BIGSERIAL PRIMARY KEY,name TEXT UNIQUE NOT NULL,active BOOLEAN NOT NULL DEFAULT TRUE)'))
         c.execute(text('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)'))
@@ -51,7 +53,7 @@ def valid(d):
     return True,''
 def available(d,doctor):
     if not valid(d)[0]:return []
-    taken={x['appointment_time'] for x in allq("SELECT appointment_time FROM appointments WHERE appointment_date=:d AND doctor=:doc AND status!='Цуцлагдсан'",{'d':d,'doc':doctor})}
+    taken={x['appointment_time'] for x in allq("SELECT appointment_time FROM appointments WHERE appointment_date=:d AND doctor=:doc AND status!='Цуцлагдсан' AND deleted=FALSE",{'d':d,'doc':doctor})}
     return [x for x in slots() if x not in taken]
 def create(data):
     for k in ['full_name','phone','register_no','doctor','appointment_date','appointment_time']:
@@ -100,13 +102,18 @@ def logout():session.clear();return redirect('/admin/login')
 @APP.get('/admin')
 @guard
 def admin():
-    d=request.args.get('date',date.today().isoformat());rows=allq('SELECT * FROM appointments WHERE appointment_date=:d ORDER BY appointment_time',{'d':d})
+    d=request.args.get('date',date.today().isoformat());rows=allq('SELECT * FROM appointments WHERE appointment_date=:d AND deleted=FALSE ORDER BY appointment_time',{'d':d})
     body=TOP+'<div class=c><form><input type=date name=date value="%s"><button>Харах</button></form></div><div class="c scroll"><table><tr><th>ID</th><th>Цаг</th><th>Эмч</th><th>Нэр</th><th>Утас</th><th>Регистр</th><th>Үйлчилгээ</th><th>Төлөв</th><th>Үйлдэл</th></tr>'%d
-    for x in rows:body+=f'''<tr><td>{x['id']}</td><td>{x['appointment_time']}</td><td>{x['doctor']}</td><td>{x['full_name']}</td><td>{x['phone']}</td><td>{x['register_no']}</td><td>{x['service'] or ''}</td><td>{x['status']}</td><td><form class=inline method=post action=/admin/status/{x['id']}><input type=hidden name=date value={d}><select name=status><option>Шинэ</option><option>Баталгаажсан</option><option>Ирсэн</option><option>Дууссан</option><option>Цуцлагдсан</option></select><button>Солих</button></form></td></tr>'''
+    for x in rows:body+=f'''<tr><td>{x['id']}</td><td>{x['appointment_time']}</td><td>{x['doctor']}</td><td>{x['full_name']}</td><td>{x['phone']}</td><td>{x['register_no']}</td><td>{x['service'] or ''}</td><td>{x['status']}</td><td><form class=inline method=post action=/admin/status/{x['id']}><input type=hidden name=date value={d}><select name=status><option>Шинэ</option><option>Баталгаажсан</option><option>Ирсэн</option><option>Дууссан</option><option>Цуцлагдсан</option></select><button>Солих</button></form> <form class=inline method=post action=/admin/delete/{x['id']} onsubmit="return confirm('MIS дээр мөн устгах уу?')"><input type=hidden name=date value={d}><button class=red>Устгах</button></form></td></tr>'''
     return body+'</table></div></div>'
 @APP.post('/admin/status/<int:i>')
 @guard
 def ast(i):run('UPDATE appointments SET status=:s WHERE id=:i',{'s':request.form['status'],'i':i});return redirect('/admin?date='+request.form['date'])
+@APP.post('/admin/delete/<int:i>')
+@guard
+def admin_delete(i):
+    run('UPDATE appointments SET deleted=TRUE, delete_synced=FALSE WHERE id=:i',{'i':i})
+    return redirect('/admin?date='+request.form.get('date',date.today().isoformat()))
 @APP.route('/admin/doctors',methods=['GET','POST'])
 @guard
 def doctors():
@@ -141,7 +148,7 @@ def health():return jsonify({'ok':True,'database':'postgresql' if url.startswith
 @APP.get('/api/appointments/pending')
 def pending():
     if request.headers.get('X-API-Key')!=API_KEY:return jsonify({'ok':False,'error':'unauthorized'}),401
-    return jsonify({'ok':True,'appointments':allq("SELECT id,full_name,phone,register_no,service,CAST(appointment_date AS TEXT) appointment_date,appointment_time,doctor,status,source,note FROM appointments WHERE synced=FALSE ORDER BY id")})
+    return jsonify({'ok':True,'appointments':allq("SELECT id,full_name,phone,register_no,service,CAST(appointment_date AS TEXT) appointment_date,appointment_time,doctor,status,source,note FROM appointments WHERE synced=FALSE AND deleted=FALSE ORDER BY id")})
 @APP.post('/api/appointments/mark-synced')
 def synced():
     if request.headers.get('X-API-Key')!=API_KEY:return jsonify({'ok':False,'error':'unauthorized'}),401
@@ -149,6 +156,26 @@ def synced():
     n=0
     for i in ids:n+=run('UPDATE appointments SET synced=TRUE WHERE id=:i',{'i':i}).rowcount
     return jsonify({'ok':True,'updated':n})
+
+@APP.get('/api/appointments/deletions')
+def deletions():
+    if request.headers.get('X-API-Key')!=API_KEY:return jsonify({'ok':False,'error':'unauthorized'}),401
+    ids=[x['id'] for x in allq('SELECT id FROM appointments WHERE deleted=TRUE AND delete_synced=FALSE ORDER BY id')]
+    return jsonify({'ok':True,'ids':ids})
+
+@APP.post('/api/appointments/mark-deletions-synced')
+def mark_deletions_synced():
+    if request.headers.get('X-API-Key')!=API_KEY:return jsonify({'ok':False,'error':'unauthorized'}),401
+    ids=[int(x) for x in (request.get_json(silent=True) or {}).get('ids',[]) if str(x).isdigit()]
+    n=0
+    for i in ids:n+=run('UPDATE appointments SET delete_synced=TRUE WHERE id=:i AND deleted=TRUE',{'i':i}).rowcount
+    return jsonify({'ok':True,'updated':n})
+
+@APP.post('/api/appointments/<int:i>/delete')
+def api_delete(i):
+    if request.headers.get('X-API-Key')!=API_KEY:return jsonify({'ok':False,'error':'unauthorized'}),401
+    n=run('UPDATE appointments SET deleted=TRUE, delete_synced=FALSE WHERE id=:i',{'i':i}).rowcount
+    return jsonify({'ok':bool(n),'updated':n})
 
 init()
 if __name__=='__main__':APP.run(host='0.0.0.0',port=int(os.environ.get('PORT','8000')))
